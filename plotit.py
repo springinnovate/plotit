@@ -1,17 +1,16 @@
 import os
+import math
 import argparse
 import string
 import msvcrt
 import pandas as pd
 import matplotlib.pyplot as plt
-from itertools import cycle
-from itertools import product
+from itertools import cycle, product
 
 KEYS = string.digits + string.ascii_lowercase
 PAGE_SIZE = len(KEYS)
 POSSIBLE_COLORS = ["black", "blue", "red", "green", "orange", "purple"]
 POSSIBLE_SYMBOLS = [".", "+", "x", "o", "^", "s"]
-STYLE_ITER = cycle(product(POSSIBLE_SYMBOLS, POSSIBLE_COLORS))
 
 
 def clear():
@@ -23,10 +22,9 @@ def get_key():
 
 
 def menu(options, title, multi=False, highlight_idx=None):
-    options = list(options)  # ensure indexable
+    options = list(options)
     selected = [False] * len(options)
-    cursor = 0
-    page = 0
+    cursor, page = 0, 0
     pages = (len(options) + PAGE_SIZE - 1) // PAGE_SIZE
     while True:
         clear()
@@ -60,30 +58,33 @@ def menu(options, title, multi=False, highlight_idx=None):
                 cursor = gi
 
 
-def plot_from_dict(data, graph_title=None, grid=False):
-    x_label, x_vals = data["x"]
-    fig, ax = plt.subplots()
-    for y_label, (style, color, ptype, size), y_vals in data["y"]:
-        if ptype == "line":
-            ax.plot(
-                x_vals,
-                y_vals,
-                linestyle=style,
-                color=color,
-                linewidth=size,
-                label=y_label,
+def style_iter():
+    return cycle(product(POSSIBLE_SYMBOLS, POSSIBLE_COLORS))
+
+
+def build_data_dict(df, cols, x_idx, y_idx, sty_iter):
+    return {
+        "x": (cols[x_idx], df.iloc[:, df.columns.get_loc(cols[x_idx])]),
+        "y": [
+            (
+                cols[i],
+                (*next(sty_iter), "scatter", 30),
+                df.iloc[:, df.columns.get_loc(cols[i])],
             )
-        else:
-            ax.scatter(
-                x_vals, y_vals, marker=style, color=color, s=size, label=y_label
-            )
-    ax.set_xlabel(x_label)
-    ax.grid(grid)
+            for i in y_idx
+        ],
+    }
+
+
+def plot_from_dict(ax, data, title=None):
+    x_lab, x_vals = data["x"]
+    for y_lab, (sym, colr, _, size), y_vals in data["y"]:
+        ax.scatter(x_vals, y_vals, marker=sym, color=colr, s=size, label=y_lab)
+    ax.set_xlabel(x_lab)
+    ax.grid(True)
     ax.legend()
-    fig.tight_layout()
-    if graph_title:
-        ax.set_title(graph_title)
-    return fig, ax
+    if title:
+        ax.set_title(title)
 
 
 def main():
@@ -92,43 +93,36 @@ def main():
     args = ap.parse_args()
 
     df = pd.read_csv(args.csv_path)
-    cols = sorted(df.columns.tolist())  # alphabetical
+    cols = sorted(df.columns.tolist())
 
-    # only filter fields that are strings
     possible_filter_fields = sorted(
         [
-            col
-            for col in cols
-            if df[col].dtype == "object" or df[col].dtype.name == "string"
+            c
+            for c in cols
+            if df[c].dtype == "object" or df[c].dtype.name == "string"
         ]
     )
-    chosen_filter_field_indexes = menu(
+    chosen_field_idx = menu(
         possible_filter_fields,
         "Filter columns (toggle, Enter for none):",
         multi=True,
     )
 
-    # filter the values for those chosen fields
-    df_by_field = {
-        possible_filter_fields[f_idx]: df.copy()
-        for f_idx in chosen_filter_field_indexes
-    }
-    filter_values_by_field = {}
-    for f_idx in chosen_filter_field_indexes:
-        field = possible_filter_fields[f_idx]
+    chosen_combos = []
+    for idx in chosen_field_idx:
+        field = possible_filter_fields[idx]
         vals = sorted(map(str, df[field].dropna().unique().tolist()))
-        chosen_vals = menu(
+        val_idx = menu(
             vals,
             f'Values for "{field}" (toggle, Enter to confirm):',
             multi=True,
         )
-        if chosen_vals:
-            local_df = df_by_field[field]
-            df_by_field[field] = local_df[
-                local_df[field].astype(str).isin([vals[i] for i in chosen_vals])
-            ]
-            # get string representation of those values
-            filter_values_by_field[field] = [vals[idx] for idx in chosen_vals]
+        for vi in val_idx:
+            chosen_combos.append((field, vals[vi]))
+
+    if not chosen_combos:
+        chosen_combos.append((None, None))
+
     x_idx = menu(cols, "Select X column (Enter to confirm):")
     y_idx = menu(
         cols,
@@ -137,31 +131,34 @@ def main():
         highlight_idx=x_idx,
     )
 
-    for f_idx in chosen_filter_field_indexes:
-        field = possible_filter_fields[f_idx]
-        local_df = df_by_field[field]
-        data_dict = {
-            "x": (
-                cols[x_idx],
-                local_df.iloc[:, local_df.columns.get_loc(cols[x_idx])],
-            ),
-            "y": [
-                (
-                    cols[i],
-                    (*next(STYLE_ITER), "scatter", 30),
-                    local_df.iloc[:, local_df.columns.get_loc(cols[i])],
-                )
-                for i in y_idx
-            ],
-        }
+    n_plots = len(chosen_combos)
+    n_cols = math.ceil(math.sqrt(n_plots))
+    n_rows = math.ceil(n_plots / n_cols)
 
-        clear()
-        filter_values = filter_values_by_field[field]
-        subtitle = ", ".join(filter_values) if filter_values else "All"
-        graph_title = f"{field}: {subtitle}"
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(4 * n_cols, 4 * n_rows),
+        squeeze=False,
+    )
+    sty_iter = style_iter()
 
-        plot_from_dict(data_dict, graph_title=graph_title, grid=True)
-        plt.show()
+    for (field, val), ax in zip(chosen_combos, axes.flatten()):
+        if field is None:
+            sub_df = df
+            title = "All data"
+        else:
+            sub_df = df[df[field].astype(str) == val]
+            title = f"{field}: {val}"
+        data_dict = build_data_dict(sub_df, cols, x_idx, y_idx, sty_iter)
+        plot_from_dict(ax, data_dict, title=title)
+
+    # turn off any unused axes
+    for ax in axes.flatten()[len(chosen_combos) :]:
+        ax.axis("off")
+
+    fig.tight_layout()
+    plt.show()
 
 
 if __name__ == "__main__":
