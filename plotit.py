@@ -1,49 +1,55 @@
-import os
-import math
+#!/usr/bin/env python3
 import argparse
+import math
+import os
 import string
-import msvcrt
-import pandas as pd
-import matplotlib.pyplot as plt
+import sys
 from itertools import cycle, product
+from pathlib import Path
 
-KEYS = string.digits + string.ascii_lowercase
-PAGE_SIZE = len(KEYS)
-POSSIBLE_COLORS = ["black", "blue", "red", "green", "orange", "purple"]
-POSSIBLE_SYMBOLS = [".", "+", "x", "o", "^", "s"]
+import matplotlib.pyplot as plt
+import pandas as pd
+import yaml
+import msvcrt
+
+KEYS = string.digits + string.ascii_lowercase  # 36 per page
+PAGE = len(KEYS)
+COLORS = ["black", "blue", "red", "green", "orange", "purple"]
+SYMBOLS = [".", "+", "x", "o", "^", "s"]
+STYLE_CYCLE = cycle(product(SYMBOLS, COLORS))
 
 
 def clear():
     os.system("cls" if os.name == "nt" else "clear")
 
 
-def get_key():
-    return msvcrt.getch().decode().lower()
+def getkey():
+    msvcrt.getch().decode().lower()
 
 
-def menu(options, title, multi=False, highlight_idx=None):
-    options = list(options)
-    selected = [False] * len(options)
-    cursor, page = 0, 0
-    pages = (len(options) + PAGE_SIZE - 1) // PAGE_SIZE
+def menu(items, title, multi=False, highlight=None):
+    sel, cur, page, pages = (
+        [False] * len(items),
+        0,
+        0,
+        (len(items) + PAGE - 1) // PAGE,
+    )
     while True:
         clear()
-        start, end = page * PAGE_SIZE, min((page + 1) * PAGE_SIZE, len(options))
+        start, end = page * PAGE, min((page + 1) * PAGE, len(items))
         print(f"{title}\n")
-        for i, opt in enumerate(options[start:end]):
+        for i, item in enumerate(items[start:end]):
             gi = start + i
             mark = (
-                "*"
-                if (multi and selected[gi]) or (not multi and gi == cursor)
-                else " "
+                "*" if (multi and sel[gi]) or (not multi and gi == cur) else " "
             )
-            hl = " [x-axis]" if gi == highlight_idx else ""
-            print(f"{KEYS[i]}) {mark} {opt}{hl}")
+            hl = " [x-axis]" if gi == highlight else ""
+            print(f"{KEYS[i]}) {mark} {item}{hl}")
         if pages > 1:
-            print("\n[n] next page   [b] back page   [enter] confirm")
-        k = get_key()
+            print("\n[n] next  [b] back  [enter] confirm")
+        k = getkey()
         if k in ("\r", "\n"):
-            return [i for i, s in enumerate(selected) if s] if multi else cursor
+            return [i for i, s in enumerate(sel) if s] if multi else cur
         if k == "n" and page < pages - 1:
             page += 1
             continue
@@ -52,113 +58,119 @@ def menu(options, title, multi=False, highlight_idx=None):
             continue
         if k in KEYS[: end - start]:
             gi = start + KEYS.index(k)
-            if multi:
-                selected[gi] = not selected[gi]
-            else:
-                cursor = gi
+            sel[gi] = not sel[gi] if multi else sel[gi]
+            cur = gi
 
 
 def style_iter():
-    return cycle(product(POSSIBLE_SYMBOLS, POSSIBLE_COLORS))
+    return cycle(product(SYMBOLS, COLORS))
 
 
-def build_data_dict(df, cols, x_idx, y_idx, sty_iter):
+def build_data(df, cols, x_col, y_cols, sty):
     return {
-        "x": (cols[x_idx], df.iloc[:, df.columns.get_loc(cols[x_idx])]),
-        "y": [
-            (
-                cols[i],
-                (*next(sty_iter), "scatter", 30),
-                df.iloc[:, df.columns.get_loc(cols[i])],
-            )
-            for i in y_idx
-        ],
+        "x": (x_col, df[x_col]),
+        "y": [(c, (*next(sty), "scatter", 30), df[c]) for c in y_cols],
     }
 
 
-def plot_from_dict(ax, data, title=None):
+def plot_ax(ax, data, title):
     x_lab, x_vals = data["x"]
-    for y_lab, (sym, colr, _, size), y_vals in data["y"]:
-        ax.scatter(x_vals, y_vals, marker=sym, color=colr, s=size, label=y_lab)
+    for y_lab, (sym, col, _, size), y_vals in data["y"]:
+        ax.scatter(x_vals, y_vals, marker=sym, color=col, s=size, label=y_lab)
     ax.set_xlabel(x_lab)
+    ax.set_title(title)
     ax.grid(True)
     ax.legend()
-    if title:
-        ax.set_title(title)
+
+
+# ─── Interactive configuration ───────────────────────────────────────────────
+def interactive_config(csv_path):
+    df = pd.read_csv(csv_path)
+    cols = sorted(df.columns)
+
+    # choose filter fields & values
+    str_cols = [
+        c
+        for c in cols
+        if df[c].dtype == "object" or df[c].dtype.name == "string"
+    ]
+    field_idx = menu(
+        str_cols, "Filter columns (toggle, enter for none):", multi=True
+    )
+    filters = {}
+    for i in field_idx:
+        c = str_cols[i]
+        vs = sorted(map(str, df[c].dropna().unique()))
+        vi = menu(vs, f'Values for "{c}" (toggle, enter confirm):', multi=True)
+        if vi:
+            filters[c] = [vs[j] for j in vi]
+
+    # choose axes
+    x_idx = menu(cols, "Select X column:", highlight=None)
+    y_idx = menu(
+        cols, "Select Y columns (toggle):", multi=True, highlight=x_idx
+    )
+    x_col = cols[x_idx]
+    y_cols = [cols[i] for i in y_idx]
+
+    return {
+        "csv": str(csv_path),
+        "filters": filters,
+        "x": x_col,
+        "y": y_cols,
+    }
+
+
+# ─── Plotting from YAML ───────────────────────────────────────────────────────
+def plot_from_yaml(cfg):
+    df = pd.read_csv(cfg["csv"])
+    for col, vals in cfg["filters"].items():
+        df = df[df[col].astype(str).isin(vals)]
+
+    combos = (
+        [(None, None)]
+        if not cfg["filters"]
+        else [(col, v) for col, vs in cfg["filters"].items() for v in vs]
+    )
+
+    n = len(combos)
+    nc = math.ceil(math.sqrt(n))
+    nr = math.ceil(n / nc)
+    fig, axes = plt.subplots(nr, nc, figsize=(4 * nc, 4 * nr), squeeze=False)
+    sty = style_iter()
+
+    for (col, val), ax in zip(combos, axes.flatten()):
+        sub = df if col is None else df[df[col].astype(str) == val]
+        plot_ax(
+            ax,
+            build_data(sub, sub.columns, cfg["x"], cfg["y"], sty),
+            "All data" if col is None else f"{col}: {val}",
+        )
+    for ax in axes.flatten()[n:]:
+        ax.axis("off")
+    fig.tight_layout()
+    plt.show()
 
 
 def main():
-    ap = argparse.ArgumentParser(description="CSV interactive selector")
-    ap.add_argument("csv_path")
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--file", required=True, help="CSV to configure or YAML to plot"
+    )
     args = ap.parse_args()
 
-    df = pd.read_csv(args.csv_path)
-    cols = sorted(df.columns.tolist())
-
-    possible_filter_fields = sorted(
-        [
-            c
-            for c in cols
-            if df[c].dtype == "object" or df[c].dtype.name == "string"
-        ]
-    )
-    chosen_field_idx = menu(
-        possible_filter_fields,
-        "Filter columns (toggle, Enter for none):",
-        multi=True,
-    )
-
-    chosen_combos = []
-    for idx in chosen_field_idx:
-        field = possible_filter_fields[idx]
-        vals = sorted(map(str, df[field].dropna().unique().tolist()))
-        val_idx = menu(
-            vals,
-            f'Values for "{field}" (toggle, Enter to confirm):',
-            multi=True,
-        )
-        for vi in val_idx:
-            chosen_combos.append((field, vals[vi]))
-
-    if not chosen_combos:
-        chosen_combos.append((None, None))
-
-    x_idx = menu(cols, "Select X column (Enter to confirm):")
-    y_idx = menu(
-        cols,
-        "Select Y columns (toggle, Enter to confirm):",
-        multi=True,
-        highlight_idx=x_idx,
-    )
-
-    n_plots = len(chosen_combos)
-    n_cols = math.ceil(math.sqrt(n_plots))
-    n_rows = math.ceil(n_plots / n_cols)
-
-    fig, axes = plt.subplots(
-        n_rows,
-        n_cols,
-        figsize=(4 * n_cols, 4 * n_rows),
-        squeeze=False,
-    )
-    sty_iter = style_iter()
-
-    for (field, val), ax in zip(chosen_combos, axes.flatten()):
-        if field is None:
-            sub_df = df
-            title = "All data"
-        else:
-            sub_df = df[df[field].astype(str) == val]
-            title = f"{field}: {val}"
-        data_dict = build_data_dict(sub_df, cols, x_idx, y_idx, sty_iter)
-        plot_from_dict(ax, data_dict, title=title)
-
-    # turn off any unused axes
-    for ax in axes.flatten()[len(chosen_combos) :]:
-        ax.axis("off")
-
-    fig.tight_layout()
-    plt.show()
+    fpath = Path(args.file)
+    if fpath.suffix.lower() == ".csv":
+        cfg = interactive_config(fpath)
+        yaml_path = fpath.with_suffix(".yaml")
+        yaml.safe_dump(cfg, open(yaml_path, "w"))
+        print(f"\nConfiguration saved to: {yaml_path}")
+        plot_from_yaml(cfg)
+    elif fpath.suffix.lower() == ".yaml":
+        cfg = yaml.safe_load(open(fpath))
+        plot_from_yaml(cfg)
+    else:
+        sys.exit("Provide a .csv or .yaml file to --file")
 
 
 if __name__ == "__main__":
