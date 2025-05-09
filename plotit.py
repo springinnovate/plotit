@@ -129,7 +129,6 @@ def main():
             ]
             # get string representation of those values
             filter_values_by_field[field] = [vals[idx] for idx in chosen_vals]
-
     x_idx = menu(cols, "Select X column (Enter to confirm):")
     y_idx = menu(
         cols,
