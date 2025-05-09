@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import argparse
 import math
 import os
@@ -20,11 +19,11 @@ STYLE_CYCLE = cycle(product(SYMBOLS, COLORS))
 
 
 def clear():
-    os.system("cls" if os.name == "nt" else "clear")
+    return os.system("cls" if os.name == "nt" else "clear")
 
 
 def getkey():
-    msvcrt.getch().decode().lower()
+    return msvcrt.getch().decode().lower()
 
 
 def menu(items, title, multi=False, highlight=None):
@@ -40,9 +39,7 @@ def menu(items, title, multi=False, highlight=None):
         print(f"{title}\n")
         for i, item in enumerate(items[start:end]):
             gi = start + i
-            mark = (
-                "*" if (multi and sel[gi]) or (not multi and gi == cur) else " "
-            )
+            mark = "*" if (multi and sel[gi]) or (not multi and gi == cur) else " "
             hl = " [x-axis]" if gi == highlight else ""
             print(f"{KEYS[i]}) {mark} {item}{hl}")
         if pages > 1:
@@ -90,13 +87,9 @@ def interactive_config(csv_path):
 
     # choose filter fields & values
     str_cols = [
-        c
-        for c in cols
-        if df[c].dtype == "object" or df[c].dtype.name == "string"
+        c for c in cols if df[c].dtype == "object" or df[c].dtype.name == "string"
     ]
-    field_idx = menu(
-        str_cols, "Filter columns (toggle, enter for none):", multi=True
-    )
+    field_idx = menu(str_cols, "Filter columns (toggle, enter for none):", multi=True)
     filters = {}
     for i in field_idx:
         c = str_cols[i]
@@ -107,9 +100,7 @@ def interactive_config(csv_path):
 
     # choose axes
     x_idx = menu(cols, "Select X column:", highlight=None)
-    y_idx = menu(
-        cols, "Select Y columns (toggle):", multi=True, highlight=x_idx
-    )
+    y_idx = menu(cols, "Select Y columns (toggle):", multi=True, highlight=x_idx)
     x_col = cols[x_idx]
     y_cols = [cols[i] for i in y_idx]
 
@@ -154,15 +145,13 @@ def plot_from_yaml(cfg):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument(
-        "--file", required=True, help="CSV to configure or YAML to plot"
-    )
+    ap.add_argument("--file", required=True, help="CSV to configure or YAML to plot")
     args = ap.parse_args()
 
     fpath = Path(args.file)
     if fpath.suffix.lower() == ".csv":
         cfg = interactive_config(fpath)
-        yaml_path = fpath.with_suffix(".yaml")
+        yaml_path = Path(fpath.stem).with_suffix(".yaml")
         yaml.safe_dump(cfg, open(yaml_path, "w"))
         print(f"\nConfiguration saved to: {yaml_path}")
         plot_from_yaml(cfg)
