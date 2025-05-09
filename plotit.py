@@ -53,7 +53,7 @@ def menu(options, title, multi=False, highlight_idx=None):
                 cursor = gi
 
 
-def plot_from_dict(data, grid=False):
+def plot_from_dict(data, graph_title=None, grid=False):
     x_label, x_vals = data["x"]
     fig, ax = plt.subplots()
     for y_label, (style, color, ptype, size), y_vals in data["y"]:
@@ -72,6 +72,8 @@ def plot_from_dict(data, grid=False):
     ax.grid(grid)
     ax.legend()
     fig.tight_layout()
+    if graph_title:
+        ax.set_title(graph_title)
     return fig, ax
 
 
@@ -95,6 +97,9 @@ def main():
         filter_fields, "Filter columns (toggle, Enter for none):", multi=True
     )
 
+    # filter the values for those chosen fields
+    df_by_field = {filter_fields[f_idx]: df.copy() for f_idx in chosen_fields}
+    filter_values_by_field = {}
     for f_idx in chosen_fields:
         field = filter_fields[f_idx]
         vals = sorted(map(str, df[field].dropna().unique().tolist()))
@@ -104,7 +109,12 @@ def main():
             multi=True,
         )
         if chosen_vals:
-            df = df[df[field].astype(str).isin([vals[i] for i in chosen_vals])]
+            local_df = df_by_field[field]
+            df_by_field[field] = local_df[
+                local_df[field].astype(str).isin([vals[i] for i in chosen_vals])
+            ]
+            # get string representation of those values
+            filter_values_by_field[field] = [vals[idx] for idx in chosen_vals]
 
     x_idx = menu(cols, "Select X column (Enter to confirm):")
     y_idx = menu(
@@ -114,24 +124,35 @@ def main():
         highlight_idx=x_idx,
     )
 
-    data_dict = {
-        "x": (cols[x_idx], df.iloc[:, df.columns.get_loc(cols[x_idx])]),
-        "y": [
-            (
-                cols[i],
-                (".", "black", "scatter", 30),
-                df.iloc[:, df.columns.get_loc(cols[i])],
-            )
-            for i in y_idx
-        ],
-    }
+    for f_idx in chosen_fields:
+        field = filter_fields[f_idx]
+        local_df = df_by_field[field]
+        data_dict = {
+            "x": (
+                cols[x_idx],
+                local_df.iloc[:, local_df.columns.get_loc(cols[x_idx])],
+            ),
+            "y": [
+                (
+                    cols[i],
+                    (".", "black", "scatter", 30),
+                    local_df.iloc[:, local_df.columns.get_loc(cols[i])],
+                )
+                for i in y_idx
+            ],
+        }
 
-    clear()
-    print("X:", data_dict["x"][0])
-    print("Y:", [y[0] for y in data_dict["y"]])
+        clear()
+        print("X:", data_dict["x"][0])
+        print("Y:", [y[0] for y in data_dict["y"]])
 
-    plot_from_dict(data_dict, grid=True)
-    plt.show()
+        filter_values = filter_values_by_field[field]
+        print(filter_values)
+        subtitle = ", ".join(filter_values) if filter_values else "All"
+        graph_title = f"{field}: {subtitle}"
+
+        plot_from_dict(data_dict, graph_title=graph_title, grid=True)
+        plt.show()
 
 
 if __name__ == "__main__":
