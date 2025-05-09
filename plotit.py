@@ -4,9 +4,14 @@ import string
 import msvcrt
 import pandas as pd
 import matplotlib.pyplot as plt
+from itertools import cycle
+from itertools import product
 
 KEYS = string.digits + string.ascii_lowercase
 PAGE_SIZE = len(KEYS)
+POSSIBLE_COLORS = ["black", "blue", "red", "green", "orange", "purple"]
+POSSIBLE_SYMBOLS = [".", "+", "x", "o", "^", "s"]
+STYLE_ITER = cycle(product(POSSIBLE_SYMBOLS, POSSIBLE_COLORS))
 
 
 def clear():
@@ -30,7 +35,9 @@ def menu(options, title, multi=False, highlight_idx=None):
         for i, opt in enumerate(options[start:end]):
             gi = start + i
             mark = (
-                "*" if (multi and selected[gi]) or (not multi and gi == cursor) else " "
+                "*"
+                if (multi and selected[gi]) or (not multi and gi == cursor)
+                else " "
             )
             hl = " [x-axis]" if gi == highlight_idx else ""
             print(f"{KEYS[i]}) {mark} {opt}{hl}")
@@ -67,7 +74,9 @@ def plot_from_dict(data, graph_title=None, grid=False):
                 label=y_label,
             )
         else:
-            ax.scatter(x_vals, y_vals, marker=style, color=color, s=size, label=y_label)
+            ax.scatter(
+                x_vals, y_vals, marker=style, color=color, s=size, label=y_label
+            )
     ax.set_xlabel(x_label)
     ax.grid(grid)
     ax.legend()
@@ -86,22 +95,27 @@ def main():
     cols = sorted(df.columns.tolist())  # alphabetical
 
     # only filter fields that are strings
-    filter_fields = sorted(
+    possible_filter_fields = sorted(
         [
             col
             for col in cols
             if df[col].dtype == "object" or df[col].dtype.name == "string"
         ]
     )
-    chosen_fields = menu(
-        filter_fields, "Filter columns (toggle, Enter for none):", multi=True
+    chosen_filter_field_indexes = menu(
+        possible_filter_fields,
+        "Filter columns (toggle, Enter for none):",
+        multi=True,
     )
 
     # filter the values for those chosen fields
-    df_by_field = {filter_fields[f_idx]: df.copy() for f_idx in chosen_fields}
+    df_by_field = {
+        possible_filter_fields[f_idx]: df.copy()
+        for f_idx in chosen_filter_field_indexes
+    }
     filter_values_by_field = {}
-    for f_idx in chosen_fields:
-        field = filter_fields[f_idx]
+    for f_idx in chosen_filter_field_indexes:
+        field = possible_filter_fields[f_idx]
         vals = sorted(map(str, df[field].dropna().unique().tolist()))
         chosen_vals = menu(
             vals,
@@ -124,8 +138,8 @@ def main():
         highlight_idx=x_idx,
     )
 
-    for f_idx in chosen_fields:
-        field = filter_fields[f_idx]
+    for f_idx in chosen_filter_field_indexes:
+        field = possible_filter_fields[f_idx]
         local_df = df_by_field[field]
         data_dict = {
             "x": (
@@ -135,7 +149,7 @@ def main():
             "y": [
                 (
                     cols[i],
-                    (".", "black", "scatter", 30),
+                    (*next(STYLE_ITER), "scatter", 30),
                     local_df.iloc[:, local_df.columns.get_loc(cols[i])],
                 )
                 for i in y_idx
@@ -143,11 +157,7 @@ def main():
         }
 
         clear()
-        print("X:", data_dict["x"][0])
-        print("Y:", [y[0] for y in data_dict["y"]])
-
         filter_values = filter_values_by_field[field]
-        print(filter_values)
         subtitle = ", ".join(filter_values) if filter_values else "All"
         graph_title = f"{field}: {subtitle}"
 
