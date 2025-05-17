@@ -82,7 +82,9 @@ def plot_ax(ax, data, title):
 
 # ─── Interactive configuration ───────────────────────────────────────────────
 def interactive_config(csv_path):
-    df = pd.read_csv(csv_path)
+    df = pd.read_csv(csv_path, usecols=lambda c: not c.strip().startswith("Unnamed"))
+    print(df.columns)
+
     cols = sorted(df.columns)
 
     # choose filter fields & values
@@ -114,7 +116,7 @@ def interactive_config(csv_path):
 
 # ─── Plotting from YAML ───────────────────────────────────────────────────────
 def plot_from_yaml(cfg):
-    df = pd.read_csv(cfg["csv"])
+    df = pd.read_csv(cfg["csv"], usecols=lambda c: not c.strip().startswith("Unnamed"))
     for col, vals in cfg["filters"].items():
         df = df[df[col].astype(str).isin(vals)]
 
