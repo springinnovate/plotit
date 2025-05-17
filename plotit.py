@@ -63,10 +63,17 @@ def style_iter():
     return cycle(product(SYMBOLS, COLORS))
 
 
-def build_data(df, cols, x_col, y_cols, sty):
+def build_data(df, x_col, y_info):
     return {
         "x": (x_col, df[x_col]),
-        "y": [(c, (*next(sty), "scatter", 30), df[c]) for c in y_cols],
+        "y": [
+            (
+                info["field"],
+                (info["symbol"], info["color"], "scatter", 30),
+                df[info["field"]],
+            )
+            for info in y_info
+        ],
     }
 
 
@@ -80,11 +87,8 @@ def plot_ax(ax, data, title):
     ax.legend()
 
 
-# ─── Interactive configuration ───────────────────────────────────────────────
 def interactive_config(csv_path):
-    df = pd.read_csv(csv_path, usecols=lambda c: not c.strip().startswith("Unnamed"))
-    print(df.columns)
-
+    df = pd.read_csv(csv_path)
     cols = sorted(df.columns)
 
     # choose filter fields & values
@@ -106,17 +110,23 @@ def interactive_config(csv_path):
     x_col = cols[x_idx]
     y_cols = [cols[i] for i in y_idx]
 
+    # assign styles to each y column
+    sty = style_iter()
+    y_info = [
+        {"field": col, "symbol": sym, "color": clr}
+        for col, (sym, clr) in zip(y_cols, (next(sty) for _ in y_cols))
+    ]
+
     return {
         "csv": str(csv_path),
         "filters": filters,
         "x": x_col,
-        "y": y_cols,
+        "y": y_info,
     }
 
 
-# ─── Plotting from YAML ───────────────────────────────────────────────────────
 def plot_from_yaml(cfg):
-    df = pd.read_csv(cfg["csv"], usecols=lambda c: not c.strip().startswith("Unnamed"))
+    df = pd.read_csv(cfg["csv"])
     for col, vals in cfg["filters"].items():
         df = df[df[col].astype(str).isin(vals)]
 
@@ -130,13 +140,12 @@ def plot_from_yaml(cfg):
     nc = math.ceil(math.sqrt(n))
     nr = math.ceil(n / nc)
     fig, axes = plt.subplots(nr, nc, figsize=(4 * nc, 4 * nr), squeeze=False)
-    sty = style_iter()
 
     for (col, val), ax in zip(combos, axes.flatten()):
         sub = df if col is None else df[df[col].astype(str) == val]
         plot_ax(
             ax,
-            build_data(sub, sub.columns, cfg["x"], cfg["y"], sty),
+            build_data(sub, cfg["x"], cfg["y"]),
             "All data" if col is None else f"{col}: {val}",
         )
     for ax in axes.flatten()[n:]:
@@ -154,7 +163,7 @@ def main():
     if fpath.suffix.lower() == ".csv":
         cfg = interactive_config(fpath)
         yaml_path = Path(fpath.stem).with_suffix(".yaml")
-        yaml.safe_dump(cfg, open(yaml_path, "w"))
+        yaml.safe_dump(cfg, open(yaml_path, "w"), sort_keys=False)
         print(f"\nConfiguration saved to: {yaml_path}")
         plot_from_yaml(cfg)
     elif fpath.suffix.lower() == ".yaml":
